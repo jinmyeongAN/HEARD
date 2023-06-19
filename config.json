@@ -12,7 +12,7 @@
         "max_seq_len": 100,
         "max_post_len": 300,
         "batch_size": 16,
-        "epochs": 12,
+        "epochs": 30,
         "lstm_dropout": 0.1,
         "fc_dropout": 0.3,
         "beta": {
