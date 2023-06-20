@@ -11,6 +11,11 @@ from tqdm import tqdm
 import wandb
 
 
+# panelty for latency f1
+def penalty(delay, p):
+    return -1 + 2 / (1 + np.exp(-p * (delay - 1)))
+
+
 class EarlyStopping:
     def __init__(self, stop_rate, patience, model_dir):
 
@@ -259,6 +264,10 @@ class Train(object):
             preds = torch.LongTensor()
             trues = torch.LongTensor()
             early_rate = torch.FloatTensor()
+            # stop_idx list for risk labl
+            stops_index_list = []
+            real_len_list = []
+
             for Batch_data in test_loader:
                 label_seqs, seq_lengths, post_indexes, real_lens, eids, tids = Batch_data[
                     0], Batch_data[6], Batch_data[3], Batch_data[10], Batch_data[11], Batch_data[12]
@@ -282,6 +291,15 @@ class Train(object):
                 predicts[eid]['stop_point'] = stop_points[0]
                 predicts[eid]['delta_N_at_stops'] = delta_N_at_stops[0]
                 early_rate = torch.cat((early_rate, er.cpu().data))
+                # stop_idx update
+                if label_seqs[0:1].cpu().data[0] == 1:  # risk 일때 만, stop_index 수집
+                    stops_index_list.append(int(stops_index) + 1)
+                    real_len_list.append(int(real_lens))
+
+            # find median of stop_idx
+            mid_delay = np.median(stops_index_list)
+            p = np.log(3) * (1 / (np.median(real_len_list) - 1))
+            latency_weight = 1 - penalty(mid_delay, p)
 
             evals = classification_report(
                 trues, preds, output_dict=True, zero_division=0
@@ -302,7 +320,7 @@ class Train(object):
             sea = (1-avg_er+1-avg_stable+test_acc)/3
             print("Test_Acc {:.4f} | ER : {:.4f} | Test_R {:.4f} | Test_P {:.4f} | Test_F {:.4f} | SEA {:.4f}".format(
                 test_acc, torch.mean(early_rate).cpu().data, test_recall, test_precision, test_f1, sea))
-
+            print(f"Latency_F1: {latency_weight * test_f1}")
             wandb.log(
                 {
                     "SEA": sea,
@@ -311,6 +329,7 @@ class Train(object):
                     "Test_recall": test_recall,
                     "Test_precision": test_precision,
                     "Test_F1": test_f1,
+                    "Latency_F1": latency_weight * test_f1,
                 }
             )
         return test_acc, test_recall, test_precision, test_f1, torch.mean(early_rate).cpu().data.item(), sea
